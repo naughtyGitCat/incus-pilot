@@ -171,8 +171,8 @@ const fetchInstances = async () => {
 const subscribeOperationEvents = (operationId: string) => {
   showProgressModal.value = true
   progressStatus.value = 'Creating Instance'
-  progressPercentage.value = 10
-  progressMessage.value = 'Downloading image & creating container...'
+  progressPercentage.value = 15
+  progressMessage.value = 'Downloading image & creating instance...'
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = localStorage.getItem('token') || ''
@@ -212,7 +212,6 @@ const subscribeOperationEvents = (operationId: string) => {
   }
 
   ws.onerror = () => {
-    // 降级为定时器轮询
     pollOperationStatus(operationId)
   }
 }
@@ -255,7 +254,9 @@ const handleCreate = async () => {
         type: 'image',
         mode: 'pull',
         server: createForm.value.server,
-        alias: createForm.value.alias
+        alias: createForm.value.alias,
+        protocol: 'simplestreams',
+        instance_type: createForm.value.type
       }
     }
     const res = await api.post('/incus/instances', payload)

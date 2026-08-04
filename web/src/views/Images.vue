@@ -142,7 +142,8 @@ const handleDownload = async () => {
         type: 'image',
         mode: 'pull',
         server: downloadForm.value.server,
-        alias: downloadForm.value.alias
+        alias: downloadForm.value.alias,
+        protocol: 'simplestreams'
       }
     }
     await api.post('/incus/images', payload)
