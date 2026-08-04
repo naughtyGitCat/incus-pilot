@@ -34,6 +34,11 @@
       <Storage />
     </div>
 
+    <!-- 本地镜像模块 (Local Images) -->
+    <div style="margin-top: 24px">
+      <Images />
+    </div>
+
     <!-- 容器列表模块 (Instances) -->
     <div style="margin-top: 24px">
       <Instances />
@@ -46,6 +51,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Instances from './Instances.vue'
 import Storage from './Storage.vue'
+import Images from './Images.vue'
 import api from '../api'
 
 const router = useRouter()

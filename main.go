@@ -24,7 +24,6 @@ func main() {
 	password := flag.String("password", "admin123456", "Admin password for login")
 	flag.Parse()
 
-	// 从环境变量读取密码重置（如有）
 	if envPass := os.Getenv("INCUS_PILOT_PASSWORD"); envPass != "" {
 		*password = envPass
 	}
@@ -38,11 +37,12 @@ func main() {
 	// 1. 公开接口
 	r.POST("/api/login", auth.LoginHandler)
 
-	// 2. 需要 JWT 认证的受保护 API (直接代理给 Incus Socket)
+	// 2. 需要 JWT 认证的受保护 API
 	api := r.Group("/api", auth.Middleware())
 	{
 		api.Any("/incus/*path", incusClient.ProxyHandler())
 		api.GET("/ws/exec/:name", terminal.TerminalHandler(*socketPath))
+		api.GET("/events", incusClient.EventsHandler())
 	}
 
 	// 3. 静态前端 Vue 3 (通过 go:embed 打包)
@@ -52,7 +52,6 @@ func main() {
 	}
 
 	r.NoRoute(func(c *gin.Context) {
-		// 路由 Fallback 给 Vue 单页应用
 		c.FileFromFS(c.Request.URL.Path, http.FS(distFS))
 	})
 

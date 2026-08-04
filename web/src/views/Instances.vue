@@ -37,6 +37,16 @@
       </template>
     </n-modal>
 
+    <!-- 异步操作/创建进度 Modal -->
+    <n-modal v-model:show="showProgressModal" preset="card" title="Operation Progress" style="width: 450px" :closable="false">
+      <n-space vertical align="center" style="width: 100%; padding: 12px 0">
+        <n-spin size="large" />
+        <div style="font-weight: bold; margin-top: 12px">{{ progressStatus }}</div>
+        <n-progress type="line" :percentage="progressPercentage" :indicator-placement="'inside'" style="width: 100%; margin-top: 12px" />
+        <div style="font-size: 12px; color: #888">{{ progressMessage }}</div>
+      </n-space>
+    </n-modal>
+
     <!-- 终端 Modal -->
     <n-modal v-model:show="showTerminal" preset="card" title="Web Terminal" style="width: 800px">
       <div ref="terminalContainer" style="height: 400px; background: #000"></div>
@@ -54,6 +64,11 @@ const loading = ref(false)
 const creating = ref(false)
 const instances = ref([])
 const showCreateModal = ref(false)
+const showProgressModal = ref(false)
+const progressStatus = ref('Initializing...')
+const progressPercentage = ref(0)
+const progressMessage = ref('Connecting to Incus operation stream...')
+
 const showTerminal = ref(false)
 const terminalContainer = ref<HTMLElement | null>(null)
 
@@ -153,6 +168,79 @@ const fetchInstances = async () => {
   }
 }
 
+const subscribeOperationEvents = (operationId: string) => {
+  showProgressModal.value = true
+  progressStatus.value = 'Creating Instance'
+  progressPercentage.value = 10
+  progressMessage.value = 'Downloading image & creating container...'
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = localStorage.getItem('token') || ''
+  const wsUrl = `${protocol}//${window.location.host}/api/events?token=${token}`
+
+  const ws = new WebSocket(wsUrl)
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'operation' && data.metadata) {
+        const op = data.metadata
+        if (op.id === operationId || op.resources?.instances?.some((i: string) => i.includes(createForm.value.name))) {
+          progressStatus.value = op.description || 'Creating Instance'
+          if (op.status === 'Success') {
+            progressPercentage.value = 100
+            progressMessage.value = 'Completed!'
+            message.success(`Instance ${createForm.value.name} created successfully!`)
+            setTimeout(() => {
+              showProgressModal.value = false
+              fetchInstances()
+              ws.close()
+            }, 1000)
+          } else if (op.status === 'Failure') {
+            message.error(op.err || 'Instance creation failed')
+            showProgressModal.value = false
+            ws.close()
+          } else {
+            if (progressPercentage.value < 90) progressPercentage.value += 15
+            if (op.metadata?.download_progress) {
+              progressMessage.value = `Downloading: ${op.metadata.download_progress}`
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  ws.onerror = () => {
+    // 降级为定时器轮询
+    pollOperationStatus(operationId)
+  }
+}
+
+const pollOperationStatus = (operationId: string) => {
+  const interval = setInterval(async () => {
+    try {
+      const res = await api.get(`/incus/operations/${operationId}`)
+      const op = res.data.metadata
+      if (op.status === 'Success') {
+        clearInterval(interval)
+        progressPercentage.value = 100
+        showProgressModal.value = false
+        message.success('Creation completed!')
+        fetchInstances()
+      } else if (op.status === 'Failure') {
+        clearInterval(interval)
+        showProgressModal.value = false
+        message.error(op.err || 'Creation failed')
+      }
+    } catch (e) {
+      clearInterval(interval)
+      showProgressModal.value = false
+      fetchInstances()
+    }
+  }, 2000)
+}
+
 const handleCreate = async () => {
   if (!createForm.value.name) {
     message.warning('Please enter an instance name')
@@ -170,11 +258,12 @@ const handleCreate = async () => {
         alias: createForm.value.alias
       }
     }
-    await api.post('/incus/instances', payload)
-    message.success(`Instance ${createForm.value.name} creation started`)
+    const res = await api.post('/incus/instances', payload)
     showCreateModal.value = false
-    createForm.value.name = ''
-    setTimeout(fetchInstances, 3000)
+    const opUrl = res.data.operation || ''
+    const opId = opUrl.split('/').pop() || ''
+
+    subscribeOperationEvents(opId)
   } catch (err: any) {
     message.error(err.response?.data?.error || 'Failed to create instance')
   } finally {
