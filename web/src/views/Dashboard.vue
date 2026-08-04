@@ -2,9 +2,10 @@
   <div class="layout">
     <n-space justify="space-between" align="center" style="margin-bottom: 24px">
       <h2>🚀 Incus Pilot Overview</h2>
-      <n-button @click="handleLogout">Logout</n-button>
+      <n-button type="warning" size="small" @click="handleLogout">Logout</n-button>
     </n-space>
 
+    <!-- 概览数据卡片 -->
     <n-grid :cols="4" :x-gap="12">
       <n-gi>
         <n-card title="Total Instances">
@@ -22,12 +23,18 @@
         </n-card>
       </n-gi>
       <n-gi>
-        <n-card title="Incus Version">
-          <div class="stat-value">{{ serverVersion }}</div>
+        <n-card title="Storage Pools">
+          <div class="stat-value text-info">{{ storagePoolsCount }}</div>
         </n-card>
       </n-gi>
     </n-grid>
 
+    <!-- 存储池模块 (Storage Pools) -->
+    <div style="margin-top: 24px">
+      <Storage />
+    </div>
+
+    <!-- 容器列表模块 (Instances) -->
     <div style="margin-top: 24px">
       <Instances />
     </div>
@@ -38,21 +45,25 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Instances from './Instances.vue'
+import Storage from './Storage.vue'
 import api from '../api'
 
 const router = useRouter()
 const instancesCount = ref(0)
 const runningCount = ref(0)
 const stoppedCount = ref(0)
-const serverVersion = ref('v6.23')
+const storagePoolsCount = ref(0)
 
 const fetchOverview = async () => {
   try {
-    const res = await api.get('/incus/instances?recursion=1')
-    const list = res.data.metadata || []
+    const resInst = await api.get('/incus/instances?recursion=1')
+    const list = resInst.data.metadata || []
     instancesCount.value = list.length
     runningCount.value = list.filter((i: any) => i.status === 'Running').length
     stoppedCount.value = list.filter((i: any) => i.status !== 'Running').length
+
+    const resPools = await api.get('/incus/storage-pools?recursion=1')
+    storagePoolsCount.value = (resPools.data.metadata || []).length
   } catch (err) {}
 }
 
@@ -77,5 +88,8 @@ onMounted(fetchOverview)
 }
 .text-warning {
   color: #f2c97d;
+}
+.text-info {
+  color: #70c0e8;
 }
 </style>

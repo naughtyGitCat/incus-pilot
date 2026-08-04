@@ -2,7 +2,7 @@
   <div class="layout">
     <n-space justify="space-between" align="center" style="margin-bottom: 16px">
       <h2>Storage Pools</h2>
-      <n-button type="primary" @click="fetchStorage">Refresh</n-button>
+      <n-button type="primary" size="small" @click="fetchStorage">Refresh</n-button>
     </n-space>
 
     <n-data-table :columns="columns" :data="pools" :loading="loading" />
@@ -10,8 +10,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { ref, onMounted, h } from 'vue'
+import { NTag, useMessage } from 'naive-ui'
 import api from '../api'
 
 const message = useMessage()
@@ -19,10 +19,35 @@ const loading = ref(false)
 const pools = ref([])
 
 const columns = [
-  { title: 'Name', key: 'name' },
-  { title: 'Driver', key: 'driver' },
-  { title: 'Status', key: 'status' },
-  { title: 'Source', key: 'config.source' }
+  { title: 'Pool Name', key: 'name' },
+  {
+    title: 'Driver',
+    key: 'driver',
+    render(row: any) {
+      return h(NTag, { type: 'info' }, { default: () => row.driver })
+    }
+  },
+  {
+    title: 'Status',
+    key: 'status',
+    render(row: any) {
+      return h(NTag, { type: 'success' }, { default: () => row.status || 'Created' })
+    }
+  },
+  {
+    title: 'Source / Location',
+    key: 'config',
+    render(row: any) {
+      return row.config?.source || row.config?.['btrfs.pool_name'] || '-'
+    }
+  },
+  {
+    title: 'Used By (Count)',
+    key: 'used_by',
+    render(row: any) {
+      return (row.used_by || []).length
+    }
+  }
 ]
 
 const fetchStorage = async () => {
@@ -42,6 +67,6 @@ onMounted(fetchStorage)
 
 <style scoped>
 .layout {
-  padding: 24px;
+  padding: 0;
 }
 </style>
