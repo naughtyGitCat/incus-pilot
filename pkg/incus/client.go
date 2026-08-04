@@ -38,19 +38,24 @@ func NewClient(socketPath string) *Client {
 
 // ProxyHandler 透明代理 /api/incus/* -> Incus /1.0/*
 func (c *Client) ProxyHandler() gin.HandlerFunc {
-	target, _ := url.Parse("http://localhost/1.0")
+	// target 设置为根 host "http://localhost"，由 Director 精确拼装 /1.0 路径
+	target, _ := url.Parse("http://localhost")
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = c.httpClient.Transport
 
-	return func(ctx *gin.Context) {
-		req := ctx.Request
-		// 将 /api/incus/xxx 替换为 /1.0/xxx
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		// 替换前缀 /api/incus -> /1.0
 		req.URL.Path = strings.Replace(req.URL.Path, "/api/incus", "/1.0", 1)
 		if req.URL.RawPath != "" {
 			req.URL.RawPath = strings.Replace(req.URL.RawPath, "/api/incus", "/1.0", 1)
 		}
 		req.Host = "localhost"
-		proxy.ServeHTTP(ctx.Writer, req)
+	}
+
+	return func(ctx *gin.Context) {
+		proxy.ServeHTTP(ctx.Writer, ctx.Request)
 	}
 }
