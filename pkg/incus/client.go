@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,25 +36,21 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
-// ProxyHandler 将 /api/incus/* 路径透明代理到 Incus 的 Unix Socket /1.0/*
+// ProxyHandler 透明代理 /api/incus/* -> Incus /1.0/*
 func (c *Client) ProxyHandler() gin.HandlerFunc {
 	target, _ := url.Parse("http://localhost/1.0")
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = c.httpClient.Transport
 
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		// 从 /api/incus/instances 剥离前缀，转为 /1.0/instances
-		path := req.URL.Path
-		if len(path) >= 10 && path[:10] == "/api/incus" {
-			req.URL.Path = "/1.0" + path[10:]
+	return func(ctx *gin.Context) {
+		req := ctx.Request
+		// 将 /api/incus/xxx 替换为 /1.0/xxx
+		req.URL.Path = strings.Replace(req.URL.Path, "/api/incus", "/1.0", 1)
+		if req.URL.RawPath != "" {
+			req.URL.RawPath = strings.Replace(req.URL.RawPath, "/api/incus", "/1.0", 1)
 		}
 		req.Host = "localhost"
-	}
-
-	return func(ctx *gin.Context) {
-		proxy.ServeHTTP(ctx.Writer, ctx.Request)
+		proxy.ServeHTTP(ctx.Writer, req)
 	}
 }
