@@ -75,7 +75,7 @@ const terminalContainer = ref<HTMLElement | null>(null)
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
-  alias: 'rockylinux/9',
+  alias: 'alpine/3.21',
   type: 'container'
 })
 
@@ -84,11 +84,11 @@ const serverOptions = [
 ]
 
 const aliasOptions = [
+  { label: 'Alpine 3.21', value: 'alpine/3.21' },
   { label: 'Rocky Linux 9', value: 'rockylinux/9' },
   { label: 'Rocky Linux 8', value: 'rockylinux/8' },
   { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
   { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
-  { label: 'Alpine 3.20', value: 'alpine/3.20' },
   { label: 'Fedora 40', value: 'fedora/40' },
   { label: 'AlmaLinux 9', value: 'almalinux/9' },
   { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
