@@ -47,16 +47,25 @@
       </n-space>
     </n-modal>
 
-    <!-- 终端 Modal -->
-    <n-modal v-model:show="showTerminal" preset="card" title="Web Terminal" style="width: 800px">
-      <div ref="terminalContainer" style="height: 400px; background: #000"></div>
+    <!-- Web 终端 Modal -->
+    <n-modal
+      v-model:show="showTerminal"
+      preset="card"
+      :title="`Web Terminal - ${currentTerminalInstance}`"
+      style="width: 820px"
+      :on-after-leave="closeTerminal"
+      :aria-hidden="false"
+    >
+      <div ref="terminalContainer" style="height: 420px; background: #1e1e1e; padding: 4px; border-radius: 4px"></div>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, nextTick, h } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
+import { Terminal } from 'xterm'
+import { FitAddon } from 'xterm-addon-fit'
 import api from '../api'
 
 const message = useMessage()
@@ -70,7 +79,11 @@ const progressPercentage = ref(0)
 const progressMessage = ref('Connecting to Incus operation stream...')
 
 const showTerminal = ref(false)
+const currentTerminalInstance = ref('')
 const terminalContainer = ref<HTMLElement | null>(null)
+let term: Terminal | null = null
+let fitAddon: FitAddon | null = null
+let ws: WebSocket | null = null
 
 const createForm = ref({
   name: '',
@@ -178,9 +191,9 @@ const subscribeOperationEvents = (operationId: string) => {
   const token = localStorage.getItem('token') || ''
   const wsUrl = `${protocol}//${window.location.host}/api/events?token=${token}`
 
-  const ws = new WebSocket(wsUrl)
+  const eventWs = new WebSocket(wsUrl)
 
-  ws.onmessage = (event) => {
+  eventWs.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
       if (data.type === 'operation' && data.metadata) {
@@ -194,12 +207,12 @@ const subscribeOperationEvents = (operationId: string) => {
             setTimeout(() => {
               showProgressModal.value = false
               fetchInstances()
-              ws.close()
+              eventWs.close()
             }, 1000)
           } else if (op.status === 'Failure') {
             message.error(op.err || 'Instance creation failed')
             showProgressModal.value = false
-            ws.close()
+            eventWs.close()
           } else {
             if (progressPercentage.value < 90) progressPercentage.value += 15
             if (op.metadata?.download_progress) {
@@ -211,7 +224,7 @@ const subscribeOperationEvents = (operationId: string) => {
     } catch (e) {}
   }
 
-  ws.onerror = () => {
+  eventWs.onerror = () => {
     pollOperationStatus(operationId)
   }
 }
@@ -294,8 +307,72 @@ const deleteInstance = async (name: string) => {
 }
 
 const openTerminal = (name: string) => {
+  currentTerminalInstance.value = name
   showTerminal.value = true
-  message.info(`Opening terminal for ${name}`)
+
+  nextTick(() => {
+    if (!terminalContainer.value) return
+
+    term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#ffffff'
+      }
+    })
+
+    fitAddon = new FitAddon()
+    term.loadAddon(fitAddon)
+
+    term.open(terminalContainer.value)
+    fitAddon.fit()
+    term.focus()
+
+    term.writeln(`Connecting to ${name}...`)
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const token = localStorage.getItem('token') || ''
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/exec/${name}?token=${token}`
+
+    ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      term?.clear()
+      term?.focus()
+    }
+
+    ws.onmessage = (event) => {
+      term?.write(event.data)
+    }
+
+    term.onData((data) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data)
+      }
+    })
+
+    ws.onclose = () => {
+      term?.writeln('\r\n\x1b[31m[Session closed]\x1b[0m')
+    }
+
+    ws.onerror = () => {
+      term?.writeln('\r\n\x1b[31m[Connection error]\x1b[0m')
+    }
+  })
+}
+
+const closeTerminal = () => {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+  if (term) {
+    term.dispose()
+    term = null
+  }
+  fitAddon = null
 }
 
 onMounted(fetchInstances)

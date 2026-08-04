@@ -55,7 +55,7 @@ const aliasOptions = [
   { label: 'Rocky Linux 8', value: 'rockylinux/8' },
   { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
   { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
-  { label: 'Alpine 3.20', value: 'alpine/3.20' },
+  { label: 'Alpine 3.21', value: 'alpine/3.21' },
   { label: 'Fedora 40', value: 'fedora/40' },
   { label: 'AlmaLinux 9', value: 'almalinux/9' },
   { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
@@ -72,12 +72,15 @@ const formatSize = (bytes: number) => {
 
 const columns = [
   {
-    title: 'Aliases',
-    key: 'aliases',
+    title: 'OS / Description',
+    key: 'description',
     render(row: any) {
-      const aliases = row.aliases || []
-      if (!aliases.length) return '-'
-      return aliases.map((a: any) => a.name).join(', ')
+      const desc = row.properties?.description || row.properties?.os || '-'
+      const aliases = (row.aliases || []).map((a: any) => a.name).join(', ')
+      return h('div', {}, [
+        h('div', { style: { fontWeight: 'bold' } }, desc),
+        aliases ? h('div', { style: { fontSize: '12px', color: '#888' } }, `Aliases: ${aliases}`) : null
+      ])
     }
   },
   {
