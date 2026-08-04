@@ -3,8 +3,8 @@
     <n-space justify="space-between" align="center" style="margin-bottom: 16px">
       <h2>Instances</h2>
       <n-space>
-        <n-button type="primary" @click="fetchInstances">Refresh</n-button>
-        <n-button type="success" @click="showCreateModal = true">Create Instance</n-button>
+        <n-button type="primary" size="small" @click="fetchInstances">Refresh</n-button>
+        <n-button type="success" size="small" @click="showCreateModal = true">Create Instance</n-button>
       </n-space>
     </n-space>
 
@@ -20,7 +20,7 @@
           <n-select v-model:value="createForm.server" :options="serverOptions" />
         </n-form-item>
         <n-form-item label="OS Alias">
-          <n-select v-model:value="createForm.alias" :options="aliasOptions" />
+          <n-select v-model:value="createForm.alias" :options="aliasOptions" filterable tag placeholder="Select or type custom alias" />
         </n-form-item>
         <n-form-item label="Type">
           <n-radio-group v-model:value="createForm.type">
@@ -60,7 +60,7 @@ const terminalContainer = ref<HTMLElement | null>(null)
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
-  alias: 'debian/12',
+  alias: 'rockylinux/9',
   type: 'container'
 })
 
@@ -69,10 +69,14 @@ const serverOptions = [
 ]
 
 const aliasOptions = [
+  { label: 'Rocky Linux 9', value: 'rockylinux/9' },
+  { label: 'Rocky Linux 8', value: 'rockylinux/8' },
   { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
   { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
   { label: 'Alpine 3.20', value: 'alpine/3.20' },
   { label: 'Fedora 40', value: 'fedora/40' },
+  { label: 'AlmaLinux 9', value: 'almalinux/9' },
+  { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
   { label: 'Arch Linux', value: 'archlinux' }
 ]
 
@@ -209,6 +213,6 @@ onMounted(fetchInstances)
 
 <style scoped>
 .layout {
-  padding: 24px;
+  padding: 0;
 }
 </style>
