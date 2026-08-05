@@ -53,6 +53,7 @@
       preset="card"
       :title="`Web Terminal - ${currentTerminalInstance}`"
       style="width: 820px"
+      :on-after-enter="initTerminal"
       :on-after-leave="closeTerminal"
     >
       <div ref="terminalContainer" style="height: 420px; background: #1e1e1e; padding: 4px; border-radius: 4px"></div>
@@ -61,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, h } from 'vue'
+import { ref, onMounted, h } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -308,58 +309,62 @@ const deleteInstance = async (name: string) => {
 const openTerminal = (name: string) => {
   currentTerminalInstance.value = name
   showTerminal.value = true
+}
 
-  nextTick(() => {
-    if (!terminalContainer.value) return
+const initTerminal = () => {
+  if (!terminalContainer.value) return
+  if (term) closeTerminal()
 
-    term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#ffffff'
-      }
-    })
-
-    fitAddon = new FitAddon()
-    term.loadAddon(fitAddon)
-
-    term.open(terminalContainer.value)
-    fitAddon.fit()
-    term.focus()
-
-    term.writeln(`Connecting to ${name}...`)
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const token = localStorage.getItem('token') || ''
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/exec/${name}?token=${token}`
-
-    ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      term?.clear()
-      term?.focus()
-    }
-
-    ws.onmessage = (event) => {
-      term?.write(event.data)
-    }
-
-    term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data)
-      }
-    })
-
-    ws.onclose = () => {
-      term?.writeln('\r\n\x1b[31m[Session closed]\x1b[0m')
-    }
-
-    ws.onerror = () => {
-      term?.writeln('\r\n\x1b[31m[Connection error]\x1b[0m')
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    theme: {
+      background: '#1e1e1e',
+      foreground: '#ffffff'
     }
   })
+
+  fitAddon = new FitAddon()
+  term.loadAddon(fitAddon)
+
+  term.open(terminalContainer.value)
+  fitAddon.fit()
+  term.focus()
+
+  const name = currentTerminalInstance.value
+  term.writeln(`Connecting to ${name}...`)
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = localStorage.getItem('token') || ''
+  const cols = term.cols || 80
+  const rows = term.rows || 24
+  const wsUrl = `${protocol}//${window.location.host}/api/ws/exec/${name}?token=${token}&cols=${cols}&rows=${rows}`
+
+  ws = new WebSocket(wsUrl)
+
+  ws.onopen = () => {
+    term?.clear()
+    term?.focus()
+  }
+
+  ws.onmessage = (event) => {
+    term?.write(event.data)
+  }
+
+  term.onData((data) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data)
+    }
+  })
+
+  ws.onclose = () => {
+    term?.writeln('\r\n\x1b[31m[Session closed]\x1b[0m')
+  }
+
+  ws.onerror = () => {
+    term?.writeln('\r\n\x1b[31m[Connection error]\x1b[0m')
+  }
 }
 
 const closeTerminal = () => {
