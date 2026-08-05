@@ -3,7 +3,6 @@ package terminal
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +51,7 @@ type windowResizeMsg struct {
 	Args    windowResizeArgs `json:"args"`
 }
 
-// TerminalHandler 处理网页 xterm.js 到 Incus 的 PTY 交互 (完整符合 LXD/Incus Control + Data 协议)
+// TerminalHandler 处理网页 xterm.js 到 Incus 的 PTY 交互
 func TerminalHandler(socketPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		instanceName := c.Param("name")
@@ -70,7 +69,7 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 			},
 		}
 
-		// 2. 发起 POST /1.0/instances/<name>/exec 申请交互会话
+		// 2. 发起 POST /1.0/instances/<name>/exec
 		payload := execPostPayload{
 			Command:          []string{"/bin/sh", "-l"},
 			Environment:      map[string]string{"TERM": "xterm-256color", "HOME": "/root"},
@@ -116,16 +115,14 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return net.Dial("unix", socketPath)
 			},
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 
-		// 4.1 连接 Incus control 端口并保持常驻
+		// 4.1 连接 Incus control 端口保持心跳并发 resize
 		if secretControl != "" {
 			controlURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secretControl)
 			controlWS, _, err := dialer.Dial(controlURL, nil)
 			if err == nil {
 				defer controlWS.Close()
-				// 发送初始 resize 规范控制包
 				resizeData, _ := json.Marshal(windowResizeMsg{
 					Command: "window-resize",
 					Args: windowResizeArgs{
@@ -135,7 +132,6 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 				})
 				controlWS.WriteMessage(websocket.TextMessage, resizeData)
 
-				// 保持 control 通道心跳直到结束
 				go func() {
 					for {
 						if _, _, err := controlWS.ReadMessage(); err != nil {
@@ -155,25 +151,25 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		}
 		defer incusWS.Close()
 
-		// 5. 双向管道转发 (Incus 数据通道要求二进制 BinaryMessage 格式)
+		// 5. 消息透传：将 IncusWS 接收到的消息以 Text 形式解包写入前端 xterm.js
 		errChan := make(chan error, 2)
 
-		// 客户端 -> Incus
+		// 前端 -> IncusWS
 		go func() {
 			for {
-				_, msg, err := wsConn.ReadMessage()
+				msgType, msg, err := wsConn.ReadMessage()
 				if err != nil {
 					errChan <- err
 					return
 				}
-				if err := incusWS.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+				if err := incusWS.WriteMessage(msgType, msg); err != nil {
 					errChan <- err
 					return
 				}
 			}
 		}()
 
-		// Incus -> 客户端
+		// IncusWS -> 前端
 		go func() {
 			for {
 				_, msg, err := incusWS.ReadMessage()
@@ -181,6 +177,7 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 					errChan <- err
 					return
 				}
+				// 转换为 TextMessage 保证 xterm.js 正常渲染字符
 				if err := wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
 					errChan <- err
 					return
