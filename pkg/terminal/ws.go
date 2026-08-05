@@ -2,18 +2,15 @@ package terminal
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	incus "github.com/lxc/incus/v6/client"
-	"github.com/lxc/incus/v6/shared/api"
+	incus "github.com/lxc/incus/client"
+	"github.com/lxc/incus/shared/api"
 )
 
 var upgrader = websocket.Upgrader{
