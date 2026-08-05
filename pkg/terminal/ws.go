@@ -62,7 +62,7 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 
 		// 2. 发起 POST /1.0/instances/<name>/exec 申请交互会话
 		payload := execPostPayload{
-			Command:          []string{"/bin/sh"},
+			Command:          []string{"/bin/sh", "-l"},
 			Environment:      map[string]string{"TERM": "xterm-256color", "HOME": "/root"},
 			WaitForWebsocket: true,
 			Interactive:      true,
@@ -116,16 +116,17 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		}
 		defer incusWS.Close()
 
-		// 5. 双向管道转发
+		// 5. 双向管道转发 (Incus 要求传输二进制数据包)
 		errChan := make(chan error, 2)
 		go func() {
 			for {
-				msgType, msg, err := wsConn.ReadMessage()
+				_, msg, err := wsConn.ReadMessage()
 				if err != nil {
 					errChan <- err
 					return
 				}
-				if err := incusWS.WriteMessage(msgType, msg); err != nil {
+				// 转换为 BinaryMessage 传给 Incus
+				if err := incusWS.WriteMessage(websocket.BinaryMessage, msg); err != nil {
 					errChan <- err
 					return
 				}
@@ -134,12 +135,13 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 
 		go func() {
 			for {
-				msgType, msg, err := incusWS.ReadMessage()
+				_, msg, err := incusWS.ReadMessage()
 				if err != nil {
 					errChan <- err
 					return
 				}
-				if err := wsConn.WriteMessage(msgType, msg); err != nil {
+				// 将 Incus 传回的数据写回前端 xterm.js
+				if err := wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
 					errChan <- err
 					return
 				}
