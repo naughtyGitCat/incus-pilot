@@ -54,7 +54,6 @@
       :title="`Web Terminal - ${currentTerminalInstance}`"
       style="width: 820px"
       :on-after-leave="closeTerminal"
-      :aria-hidden="false"
     >
       <div ref="terminalContainer" style="height: 420px; background: #1e1e1e; padding: 4px; border-radius: 4px"></div>
     </n-modal>

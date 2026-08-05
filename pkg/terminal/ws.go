@@ -42,7 +42,13 @@ type execResponse struct {
 	} `json:"metadata"`
 }
 
-// TerminalHandler 处理网页 xterm.js 到 Incus 两阶段 Exec WebSocket 桥接
+type windowResizeMsg struct {
+	Command string `json:"command"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+}
+
+// TerminalHandler 处理网页 xterm.js 到 Incus 的 PTY 交互 (支持 fds.0 与 fds.control)
 func TerminalHandler(socketPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		instanceName := c.Param("name")
@@ -62,7 +68,7 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 
 		// 2. 发起 POST /1.0/instances/<name>/exec 申请交互会话
 		payload := execPostPayload{
-			Command:          []string{"/bin/sh", "-l"},
+			Command:          []string{"/bin/sh"},
 			Environment:      map[string]string{"TERM": "xterm-256color", "HOME": "/root"},
 			WaitForWebsocket: true,
 			Interactive:      true,
@@ -87,8 +93,10 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		}
 
 		opID := execRes.Metadata.ID
-		secret := execRes.Metadata.Metadata.Fds.Zero
-		if secret == "" {
+		secretZero := execRes.Metadata.Metadata.Fds.Zero
+		secretControl := execRes.Metadata.Metadata.Fds.Control
+
+		if secretZero == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "No fd secret returned by Incus"})
 			return
 		}
@@ -100,7 +108,6 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		}
 		defer wsConn.Close()
 
-		// 4. 连接 Incus 的 WebSocket operation 端口: ws://localhost/1.0/operations/<id>/websocket?secret=<secret>
 		dialer := websocket.Dialer{
 			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return net.Dial("unix", socketPath)
@@ -108,40 +115,58 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 
-		incusWSURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secret)
-		incusWS, _, err := dialer.Dial(incusWSURL, nil)
+		// 4.1 连接 Incus control 端口 (保持 PTY 活跃)
+		if secretControl != "" {
+			controlURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secretControl)
+			controlWS, _, err := dialer.Dial(controlURL, nil)
+			if err == nil {
+				defer controlWS.Close()
+				// 发送初始 resize 消息唤醒 Incus PTY 管道
+				resizeData, _ := json.Marshal(windowResizeMsg{
+					Command: "window-resize",
+					Width:   80,
+					Height:  24,
+				})
+				controlWS.WriteMessage(websocket.TextMessage, resizeData)
+			}
+		}
+
+		// 4.2 连接 Incus 数据端口 fds.0
+		dataURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secretZero)
+		incusWS, _, err := dialer.Dial(dataURL, nil)
 		if err != nil {
 			wsConn.WriteMessage(websocket.TextMessage, []byte("Failed to dial Incus exec WS: "+err.Error()))
 			return
 		}
 		defer incusWS.Close()
 
-		// 5. 双向管道转发 (Incus 要求传输二进制数据包)
+		// 5. 双向数据转发
 		errChan := make(chan error, 2)
+
+		// 客户端 -> Incus
 		go func() {
 			for {
-				_, msg, err := wsConn.ReadMessage()
+				msgType, msg, err := wsConn.ReadMessage()
 				if err != nil {
 					errChan <- err
 					return
 				}
-				// 转换为 BinaryMessage 传给 Incus
-				if err := incusWS.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+				if err := incusWS.WriteMessage(msgType, msg); err != nil {
 					errChan <- err
 					return
 				}
 			}
 		}()
 
+		// Incus -> 客户端
 		go func() {
 			for {
-				_, msg, err := incusWS.ReadMessage()
+				msgType, msg, err := incusWS.ReadMessage()
 				if err != nil {
 					errChan <- err
 					return
 				}
-				// 将 Incus 传回的数据写回前端 xterm.js
-				if err := wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				if err := wsConn.WriteMessage(msgType, msg); err != nil {
 					errChan <- err
 					return
 				}
