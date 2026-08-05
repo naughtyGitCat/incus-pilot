@@ -32,11 +32,13 @@ type execPostPayload struct {
 type execResponse struct {
 	Type     string `json:"type"`
 	Metadata struct {
-		ID  string `json:"id"`
-		Fds struct {
-			Zero    string `json:"0"`
-			Control string `json:"control"`
-		} `json:"fds"`
+		ID       string `json:"id"`
+		Metadata struct {
+			Fds struct {
+				Zero    string `json:"0"`
+				Control string `json:"control"`
+			} `json:"fds"`
+		} `json:"metadata"`
 	} `json:"metadata"`
 }
 
@@ -85,7 +87,7 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		}
 
 		opID := execRes.Metadata.ID
-		secret := execRes.Metadata.Fds.Zero
+		secret := execRes.Metadata.Metadata.Fds.Zero
 		if secret == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "No fd secret returned by Incus"})
 			return
