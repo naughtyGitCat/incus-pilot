@@ -8,16 +8,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 )
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
 
 type execPostPayload struct {
 	Command          []string          `json:"command"`
@@ -41,17 +35,7 @@ type execResponse struct {
 	} `json:"metadata"`
 }
 
-type windowResizeArgs struct {
-	Width  string `json:"width"`
-	Height string `json:"height"`
-}
-
-type windowResizeMsg struct {
-	Command string           `json:"command"`
-	Args    windowResizeArgs `json:"args"`
-}
-
-// TerminalHandler 处理网页 xterm.js 到 Incus 的 PTY 交互
+// TerminalHandler 使用 Raw Net.Conn 双向透传连接网页 xterm.js 与 Incus PTY 管道
 func TerminalHandler(socketPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		instanceName := c.Param("name")
@@ -64,12 +48,12 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 		unixClient := &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					return net.Dial("unix", socketPath)
+					return net.DialTimeout("unix", socketPath, 10*time.Second)
 				},
 			},
 		}
 
-		// 2. 发起 POST /1.0/instances/<name>/exec
+		// 2. 发起 POST /1.0/instances/<name>/exec 申请交互会话
 		payload := execPostPayload{
 			Command:          []string{"/bin/sh", "-l"},
 			Environment:      map[string]string{"TERM": "xterm-256color", "HOME": "/root"},
@@ -104,85 +88,65 @@ func TerminalHandler(socketPath string) gin.HandlerFunc {
 			return
 		}
 
-		// 3. 升级为前端 WebSocket
-		wsConn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		// 3. Hijack 当前前端的 HTTP 连接，拿到底层的 net.Conn 原生 TCP 连接
+		hj, ok := c.Writer.(http.Hijacker)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Webserver doesn't support hijacking"})
+			return
+		}
+		clientConn, _, err := hj.Hijack()
 		if err != nil {
 			return
 		}
-		defer wsConn.Close()
+		defer clientConn.Close()
 
-		dialer := websocket.Dialer{
-			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return net.Dial("unix", socketPath)
-			},
-		}
-
-		// 4.1 连接 Incus control 端口保持心跳并发 resize
+		// 4.1 连接 Incus control Unix Socket
 		if secretControl != "" {
-			controlURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secretControl)
-			controlWS, _, err := dialer.Dial(controlURL, nil)
-			if err == nil {
-				defer controlWS.Close()
-				resizeData, _ := json.Marshal(windowResizeMsg{
-					Command: "window-resize",
-					Args: windowResizeArgs{
-						Width:  "80",
-						Height: "24",
-					},
-				})
-				controlWS.WriteMessage(websocket.TextMessage, resizeData)
+			go func() {
+				controlConn, err := net.Dial("unix", socketPath)
+				if err != nil {
+					return
+				}
+				defer controlConn.Close()
 
-				go func() {
-					for {
-						if _, _, err := controlWS.ReadMessage(); err != nil {
-							return
-						}
+				// 发送 WebSocket Upgrade 请求给 Incus control 接口
+				reqStr := fmt.Sprintf("GET /1.0/operations/%s/websocket?secret=%s HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", opID, secretControl)
+				controlConn.Write([]byte(reqStr))
+
+				// 读走握手 101 头
+				buf := make([]byte, 1024)
+				controlConn.Read(buf)
+
+				// 保持 control 管道连接不关闭
+				for {
+					if _, err := controlConn.Read(buf); err != nil {
+						return
 					}
-				}()
-			}
+				}
+			}()
 		}
 
-		// 4.2 连接 Incus 数据端口 fds.0
-		dataURL := fmt.Sprintf("ws://localhost/1.0/operations/%s/websocket?secret=%s", opID, secretZero)
-		incusWS, _, err := dialer.Dial(dataURL, nil)
+		// 4.2 连接 Incus 数据通道 fds.0 Unix Socket
+		incusDataConn, err := net.Dial("unix", socketPath)
 		if err != nil {
-			wsConn.WriteMessage(websocket.TextMessage, []byte("Failed to dial Incus exec WS: "+err.Error()))
 			return
 		}
-		defer incusWS.Close()
+		defer incusDataConn.Close()
 
-		// 5. 消息透传：将 IncusWS 接收到的消息以 Text 形式解包写入前端 xterm.js
+		// 5. 组装请求：将前端带有的 Upgrade WebSocket Headers 直接透传发给 Incus 数据端口
+		reqStr := fmt.Sprintf("GET /1.0/operations/%s/websocket?secret=%s HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", opID, secretZero)
+		incusDataConn.Write([]byte(reqStr))
+
+		// 6. 物理层原生字节双向复制拷贝 (Raw IO Pipe Copy)
 		errChan := make(chan error, 2)
-
-		// 前端 -> IncusWS
 		go func() {
-			for {
-				msgType, msg, err := wsConn.ReadMessage()
-				if err != nil {
-					errChan <- err
-					return
-				}
-				if err := incusWS.WriteMessage(msgType, msg); err != nil {
-					errChan <- err
-					return
-				}
-			}
+			_, err := io.Copy(incusDataConn, clientConn)
+			errChan <- err
 		}()
 
-		// IncusWS -> 前端
 		go func() {
-			for {
-				_, msg, err := incusWS.ReadMessage()
-				if err != nil {
-					errChan <- err
-					return
-				}
-				// 转换为 TextMessage 保证 xterm.js 正常渲染字符
-				if err := wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					errChan <- err
-					return
-				}
-			}
+			_, err := io.Copy(clientConn, incusDataConn)
+			errChan <- err
 		}()
 
 		<-errChan
