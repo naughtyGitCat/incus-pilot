@@ -20,7 +20,18 @@ type execSimplePayload struct {
 	Interactive bool              `json:"interactive"`
 }
 
-// ProvisionSSH 在容器启动后，直接通过 Incus 原生 Exec API 向容器内注入 OpenSSH Server 与公钥
+type execOpResponse struct {
+	Operation string `json:"operation"`
+}
+
+type opStatusResponse struct {
+	Metadata struct {
+		Status string `json:"status"`
+		Err    string `json:"err"`
+	} `json:"metadata"`
+}
+
+// ProvisionSSH 向容器内下发并阻塞等待 OpenSSH Server 安装与 SSH 密钥写入
 func (c *Client) ProvisionSSH(instanceName string, sshKey string) error {
 	cleanKey := strings.TrimSpace(sshKey)
 	if cleanKey == "" {
@@ -35,15 +46,14 @@ func (c *Client) ProvisionSSH(instanceName string, sshKey string) error {
 				return net.DialTimeout("unix", c.SocketPath, 10*time.Second)
 			},
 		},
-		Timeout: 45 * time.Second,
+		Timeout: 60 * time.Second,
 	}
 
-	// 构造多包管理器兼容的自动化安装与 SSH 服务启动脚本
 	script := fmt.Sprintf(`
-if command -v apk >/dev/null 2>&1; then
-  apk add --no-cache openssh-server openssh
-elif command -v dnf >/dev/null 2>&1; then
+if command -v dnf >/dev/null 2>&1; then
   dnf install -y openssh-server openssh-clients
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache openssh-server openssh
 elif command -v apt-get >/dev/null 2>&1; then
   apt-get update && apt-get install -y openssh-server
 elif command -v pacman >/dev/null 2>&1; then
@@ -84,7 +94,33 @@ fi
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("[Provisioner] Exec response for %s: %s", instanceName, string(body))
+	respBody, _ := io.ReadAll(resp.Body)
+	var opRes execOpResponse
+	json.Unmarshal(respBody, &opRes)
+
+	if opRes.Operation != "" {
+		// 阻塞轮询等待下载与安装 Task 完成
+		for i := 0; i < 30; i++ {
+			time.Sleep(2 * time.Second)
+			opResp, err := unixClient.Get(fmt.Sprintf("http://localhost%s", opRes.Operation))
+			if err != nil {
+				continue
+			}
+			opBody, _ := io.ReadAll(opResp.Body)
+			opResp.Body.Close()
+
+			var st opStatusResponse
+			if err := json.Unmarshal(opBody, &st); err == nil {
+				if st.Metadata.Status == "Success" {
+					log.Printf("[Provisioner] SSH provisioning completed successfully for %s!", instanceName)
+					return nil
+				} else if st.Metadata.Status == "Failure" {
+					log.Printf("[Provisioner] SSH provisioning failed for %s: %s", instanceName, st.Metadata.Err)
+					return fmt.Errorf(st.Metadata.Err)
+				}
+			}
+		}
+	}
+
 	return nil
 }
