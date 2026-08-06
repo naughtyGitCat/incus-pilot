@@ -8,7 +8,7 @@
       </n-space>
     </n-space>
 
-    <n-data-table :columns="columns" :data="instances" :loading="loading" :scroll-x="900" />
+    <n-data-table :columns="columns" :data="instances" :loading="loading" :scroll-x="950" />
 
     <!-- 创建容器 Modal -->
     <n-modal v-model:show="showCreateModal" preset="card" title="Create New Instance" style="width: 90%; max-width: 550px">
@@ -61,6 +61,24 @@
       </template>
     </n-modal>
 
+    <!-- 编辑容器配置 Modal -->
+    <n-modal v-model:show="showEditModal" preset="card" :title="`Edit Config - ${editForm.name}`" style="width: 90%; max-width: 500px">
+      <n-form :model="editForm" label-placement="left" label-width="120">
+        <n-form-item label="CPU Limit">
+          <n-input v-model:value="editForm.limitsCpu" placeholder="e.g. 2 (leave blank for unlimited)" />
+        </n-form-item>
+        <n-form-item label="Memory Limit">
+          <n-input v-model:value="editForm.limitsMemory" placeholder="e.g. 2GB, 512MB (leave blank for unlimited)" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showEditModal = false">Cancel</n-button>
+          <n-button type="primary" :loading="savingConfig" @click="handleSaveConfig">Save</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <!-- 管理保存的 SSH 公钥 Modal -->
     <n-modal v-model:show="showKeyManageModal" preset="card" title="Manage SSH Public Keys" style="width: 90%; max-width: 550px">
       <n-space vertical style="width: 100%">
@@ -107,8 +125,10 @@ import api from '../api'
 const message = useMessage()
 const loading = ref(false)
 const creating = ref(false)
+const savingConfig = ref(false)
 const instances = ref([])
 const showCreateModal = ref(false)
+const showEditModal = ref(false)
 const showProgressModal = ref(false)
 const showKeyManageModal = ref(false)
 
@@ -208,6 +228,12 @@ const createForm = ref({
   sshKey: defaultSSHKey
 })
 
+const editForm = ref({
+  name: '',
+  limitsCpu: '',
+  limitsMemory: ''
+})
+
 const serverOptions = [
   { label: 'Linux Containers (images:)', value: 'https://images.linuxcontainers.org' }
 ]
@@ -302,6 +328,14 @@ const columns = [
             NButton,
             {
               size: 'small',
+              onClick: () => openEditModal(row)
+            },
+            { default: () => 'Edit' }
+          ),
+          h(
+            NButton,
+            {
+              size: 'small',
               type: 'error',
               onClick: () => deleteInstance(row.name)
             },
@@ -312,6 +346,31 @@ const columns = [
     }
   }
 ]
+
+const openEditModal = (row: any) => {
+  editForm.value.name = row.name
+  editForm.value.limitsCpu = row.config?.['limits.cpu'] || ''
+  editForm.value.limitsMemory = row.config?.['limits.memory'] || ''
+  showEditModal.value = true
+}
+
+const handleSaveConfig = async () => {
+  savingConfig.value = true
+  try {
+    const patchConfig: Record<string, string> = {
+      'limits.cpu': editForm.value.limitsCpu,
+      'limits.memory': editForm.value.limitsMemory
+    }
+    await api.patch(`/incus/instances/${editForm.value.name}`, { config: patchConfig })
+    message.success(`Updated resource limits for ${editForm.value.name}`)
+    showEditModal.value = false
+    fetchInstances()
+  } catch (err: any) {
+    message.error(err.response?.data?.error || 'Failed to update instance config')
+  } finally {
+    savingConfig.value = false
+  }
+}
 
 const fetchInstances = async () => {
   loading.value = true
@@ -406,7 +465,23 @@ const handleCreate = async () => {
   try {
     const config: Record<string, string> = {}
     if (createForm.value.enableSSH && createForm.value.sshKey) {
-      config['user.ssh_key'] = createForm.value.sshKey.trim()
+      const cleanKey = createForm.value.sshKey.trim()
+      config['user.ssh_key'] = cleanKey
+      config['user.user-data'] = `#cloud-config
+package_update: true
+packages:
+  - openssh-server
+  - openssh
+ssh_authorized_keys:
+  - "${cleanKey}"
+runcmd:
+  - [ sh, -c, "apk add --no-cache openssh-server openssh || dnf install -y openssh-server || apt-get update && apt-get install -y openssh-server || true" ]
+  - [ sh, -c, "mkdir -p /root/.ssh && chmod 700 /root/.ssh" ]
+  - [ sh, -c, "echo '${cleanKey}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys" ]
+  - [ sh, -c, "ssh-keygen -A 2>/dev/null || true" ]
+  - [ sh, -c, "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true" ]
+  - [ sh, -c, "systemctl enable --now sshd || systemctl enable --now ssh || service ssh restart || /usr/sbin/sshd || true" ]
+`
     }
 
     const payload = {
