@@ -31,8 +31,8 @@
         <n-form-item label="Inject SSH Key">
           <n-space vertical style="width: 100%">
             <n-switch v-model:value="createForm.enableSSH" />
-            <span v-if="!isCloudImageHint" style="font-size: 12px; color: #f2c97d">
-              💡 Tip: Make sure to select or type a <b>/cloud</b> image alias (e.g. <i>rockylinux/9/cloud</i>) for cloud-init to execute SSH setup.
+            <span style="font-size: 12px; color: #63e2b7">
+              ✨ Auto-provisions OpenSSH server and injects public key upon creation for ALL Linux distributions.
             </span>
           </n-space>
         </n-form-item>
@@ -202,15 +202,10 @@ const keyTableColumns = [
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
-  alias: 'rockylinux/9/cloud',
+  alias: 'rockylinux/9',
   type: 'container',
   enableSSH: true,
   sshKey: defaultSSHKey
-})
-
-const isCloudImageHint = computed(() => {
-  const alias = createForm.value.alias || ''
-  return alias.includes('cloud') || alias.includes('ubuntu') || alias.includes('debian')
 })
 
 const serverOptions = [
@@ -218,14 +213,14 @@ const serverOptions = [
 ]
 
 const aliasOptions = [
-  { label: 'Rocky Linux 9 (Cloud)', value: 'rockylinux/9/cloud' },
-  { label: 'Rocky Linux 8 (Cloud)', value: 'rockylinux/8/cloud' },
-  { label: 'Debian 12 (Cloud)', value: 'debian/12/cloud' },
-  { label: 'Ubuntu 24.04 LTS (Cloud)', value: 'ubuntu/24.04/cloud' },
-  { label: 'Fedora 40 (Cloud)', value: 'fedora/40/cloud' },
+  { label: 'Rocky Linux 9', value: 'rockylinux/9' },
+  { label: 'Rocky Linux 8', value: 'rockylinux/8' },
+  { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
+  { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
+  { label: 'Fedora 40', value: 'fedora/40' },
   { label: 'Alpine 3.21', value: 'alpine/3.21' },
-  { label: 'AlmaLinux 9 (Cloud)', value: 'almalinux/9/cloud' },
-  { label: 'CentOS Stream 9 (Cloud)', value: 'centos/9-Stream/cloud' },
+  { label: 'AlmaLinux 9', value: 'almalinux/9' },
+  { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
   { label: 'Arch Linux', value: 'archlinux' }
 ]
 
@@ -411,22 +406,7 @@ const handleCreate = async () => {
   try {
     const config: Record<string, string> = {}
     if (createForm.value.enableSSH && createForm.value.sshKey) {
-      const cleanKey = createForm.value.sshKey.trim()
-      config['user.user-data'] = `#cloud-config
-package_update: true
-packages:
-  - openssh-server
-  - openssh
-ssh_authorized_keys:
-  - "${cleanKey}"
-runcmd:
-  - [ sh, -c, "apk add --no-cache openssh-server openssh || dnf install -y openssh-server || apt-get update && apt-get install -y openssh-server || true" ]
-  - [ sh, -c, "mkdir -p /root/.ssh && chmod 700 /root/.ssh" ]
-  - [ sh, -c, "echo '${cleanKey}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys" ]
-  - [ sh, -c, "ssh-keygen -A 2>/dev/null || true" ]
-  - [ sh, -c, "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true" ]
-  - [ sh, -c, "systemctl enable --now sshd || systemctl enable --now ssh || service ssh restart || /usr/sbin/sshd || true" ]
-`
+      config['user.ssh_key'] = createForm.value.sshKey.trim()
     }
 
     const payload = {

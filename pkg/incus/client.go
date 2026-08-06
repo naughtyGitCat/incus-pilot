@@ -1,8 +1,13 @@
 package incus
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -38,6 +43,11 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
+type instanceCreateReq struct {
+	Name   string            `json:"name"`
+	Config map[string]string `json:"config"`
+}
+
 // ProxyHandler 透明代理 /api/incus/* -> Incus /1.0/*
 func (c *Client) ProxyHandler() gin.HandlerFunc {
 	target, _ := url.Parse("http://localhost")
@@ -56,7 +66,61 @@ func (c *Client) ProxyHandler() gin.HandlerFunc {
 	}
 
 	return func(ctx *gin.Context) {
+		// 拦截 POST /api/incus/instances 捕获 SSH 密钥
+		if ctx.Request.Method == http.MethodPost && strings.HasSuffix(ctx.Request.URL.Path, "/instances") {
+			bodyBytes, err := io.ReadAll(ctx.Request.Body)
+			if err == nil {
+				ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+				var reqData instanceCreateReq
+				if err := json.Unmarshal(bodyBytes, &reqData); err == nil && reqData.Name != "" {
+					sshKey := reqData.Config["user.ssh_key"]
+					if sshKey != "" {
+						// 启动后台协程监控容器就绪并自动安装 sshd 与写入 Key
+						go c.autoProvisionLoop(reqData.Name, sshKey)
+					}
+				}
+			}
+		}
+
 		proxy.ServeHTTP(ctx.Writer, ctx.Request)
+	}
+}
+
+func (c *Client) autoProvisionLoop(instanceName string, sshKey string) {
+	log.Printf("[AutoProvision] Watching instance %s for SSH setup...", instanceName)
+	// 轮询等待容器完成创建并启动
+	unixClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return net.DialTimeout("unix", c.SocketPath, 5*time.Second)
+			},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	for i := 0; i < 40; i++ {
+		time.Sleep(3 * time.Second)
+		resp, err := unixClient.Get(fmt.Sprintf("http://localhost/1.0/instances/%s", instanceName))
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var statusRes struct {
+			Metadata struct {
+				Status string `json:"status"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(body, &statusRes); err == nil {
+			if statusRes.Metadata.Status == "Running" {
+				log.Printf("[AutoProvision] Instance %s is Running! Provisioning SSH...", instanceName)
+				time.Sleep(2 * time.Second)
+				c.ProvisionSSH(instanceName, sshKey)
+				return
+			}
+		}
 	}
 }
 
@@ -90,7 +154,6 @@ func (c *Client) EventsHandler() gin.HandlerFunc {
 		}
 		defer incusWS.Close()
 
-		// 双向管道转发
 		errChan := make(chan error, 2)
 		go func() {
 			for {
