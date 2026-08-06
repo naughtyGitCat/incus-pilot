@@ -8,7 +8,7 @@
       </n-space>
     </n-space>
 
-    <n-data-table :columns="columns" :data="instances" :loading="loading" :scroll-x="700" />
+    <n-data-table :columns="columns" :data="instances" :loading="loading" :scroll-x="900" />
 
     <!-- 创建容器 Modal -->
     <n-modal v-model:show="showCreateModal" preset="card" title="Create New Instance" style="width: 90%; max-width: 550px">
@@ -219,6 +219,14 @@ const aliasOptions = [
   { label: 'Arch Linux', value: 'archlinux' }
 ]
 
+const formatSize = (bytes: number) => {
+  if (!bytes || bytes <= 0) return '-'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
 const columns = [
   { title: 'Name', key: 'name' },
   {
@@ -230,6 +238,26 @@ const columns = [
     }
   },
   { title: 'Type', key: 'type' },
+  {
+    title: 'Resources (CPU / Mem / Disk)',
+    key: 'resources',
+    render(row: any) {
+      const cpuLimit = row.config?.['limits.cpu'] ? `${row.config['limits.cpu']} Core` : 'Shared CPU'
+      const memLimit = row.config?.['limits.memory'] || ''
+      const memUsage = row.state?.memory?.usage ? formatSize(row.state.memory.usage) : ''
+      const memText = memUsage ? (memLimit ? `${memUsage} / ${memLimit}` : memUsage) : (memLimit || 'Unlimited')
+
+      const diskLimit = row.expanded_devices?.root?.size || row.config?.['limits.disk'] || ''
+      const diskUsage = row.state?.disk?.root?.usage ? formatSize(row.state.disk.root.usage) : ''
+      const diskText = diskUsage ? (diskLimit ? `${diskUsage} / ${diskLimit}` : diskUsage) : (diskLimit || 'Default Pool')
+
+      return h('div', { style: { fontSize: '12px' } }, [
+        h('div', {}, `CPU: ${cpuLimit}`),
+        h('div', {}, `Mem: ${memText}`),
+        h('div', {}, `Disk: ${diskText}`)
+      ])
+    }
+  },
   {
     title: 'IPv4',
     key: 'state',
