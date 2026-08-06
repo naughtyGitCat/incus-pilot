@@ -8,11 +8,11 @@
       </n-space>
     </n-space>
 
-    <n-data-table :columns="columns" :data="instances" :loading="loading" />
+    <n-data-table :columns="columns" :data="instances" :loading="loading" :scroll-x="700" />
 
     <!-- 创建容器 Modal -->
-    <n-modal v-model:show="showCreateModal" preset="card" title="Create New Instance" style="width: 500px">
-      <n-form :model="createForm" label-placement="left" label-width="120">
+    <n-modal v-model:show="showCreateModal" preset="card" title="Create New Instance" style="width: 90%; max-width: 550px">
+      <n-form :model="createForm" label-placement="left" label-width="140">
         <n-form-item label="Name">
           <n-input v-model:value="createForm.name" placeholder="my-container" />
         </n-form-item>
@@ -28,6 +28,25 @@
             <n-radio value="virtual-machine">Virtual Machine</n-radio>
           </n-radio-group>
         </n-form-item>
+        <n-form-item label="Inject SSH Key">
+          <n-switch v-model:value="createForm.enableSSH" />
+        </n-form-item>
+        <template v-if="createForm.enableSSH">
+          <n-form-item label="Select Saved Key">
+            <n-select v-model:value="selectedKeyName" :options="savedKeyOptions" @update:value="onKeySelect" placeholder="Select a saved key" />
+          </n-form-item>
+          <n-form-item label="SSH Public Key">
+            <n-input
+              v-model:value="createForm.sshKey"
+              type="textarea"
+              :rows="3"
+              placeholder="ssh-rsa AAAAB3NzaC1..."
+            />
+          </n-form-item>
+          <n-space justify="end" style="margin-bottom: 12px">
+            <n-button size="small" type="info" @click="showKeyManageModal = true">Manage Saved Keys</n-button>
+          </n-space>
+        </template>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -37,8 +56,20 @@
       </template>
     </n-modal>
 
+    <!-- 管理保存的 SSH 公钥 Modal -->
+    <n-modal v-model:show="showKeyManageModal" preset="card" title="Manage SSH Public Keys" style="width: 90%; max-width: 550px">
+      <n-space vertical style="width: 100%">
+        <n-space align="center">
+          <n-input v-model:value="newKeyForm.name" placeholder="Name" style="width: 120px" />
+          <n-input v-model:value="newKeyForm.key" placeholder="ssh-rsa AAA..." style="width: 250px" />
+          <n-button type="primary" size="small" @click="saveNewKey">Add Key</n-button>
+        </n-space>
+        <n-data-table :columns="keyTableColumns" :data="savedKeys" size="small" />
+      </n-space>
+    </n-modal>
+
     <!-- 异步操作/创建进度 Modal -->
-    <n-modal v-model:show="showProgressModal" preset="card" title="Operation Progress" style="width: 450px" :closable="false">
+    <n-modal v-model:show="showProgressModal" preset="card" title="Operation Progress" style="width: 90%; max-width: 450px" :closable="false">
       <n-space vertical align="center" style="width: 100%; padding: 12px 0">
         <n-spin size="large" />
         <div style="font-weight: bold; margin-top: 12px">{{ progressStatus }}</div>
@@ -52,17 +83,17 @@
       v-model:show="showTerminal"
       preset="card"
       :title="`Web Terminal - ${currentTerminalInstance}`"
-      style="width: 820px"
+      style="width: 95%; max-width: 900px"
       :on-after-enter="initTerminal"
       :on-after-leave="closeTerminal"
     >
-      <div ref="terminalContainer" style="height: 420px; background: #1e1e1e; padding: 4px; border-radius: 4px"></div>
+      <div ref="terminalContainer" style="height: 60vh; max-height: 500px; min-height: 300px; background: #1e1e1e; padding: 4px; border-radius: 4px"></div>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, computed, nextTick, h } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -74,6 +105,8 @@ const creating = ref(false)
 const instances = ref([])
 const showCreateModal = ref(false)
 const showProgressModal = ref(false)
+const showKeyManageModal = ref(false)
+
 const progressStatus = ref('Initializing...')
 const progressPercentage = ref(0)
 const progressMessage = ref('Connecting to Incus operation stream...')
@@ -85,11 +118,89 @@ let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let ws: WebSocket | null = null
 
+const defaultSSHKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...'
+
+const savedKeys = ref<{ name: string; key: string }[]>([])
+const selectedKeyName = ref('Example Key')
+
+const loadSavedKeys = () => {
+  const stored = localStorage.getItem('incus_pilot_ssh_keys')
+  if (stored) {
+    try {
+      savedKeys.value = JSON.parse(stored)
+    } catch (e) {
+      savedKeys.value = [{ name: 'Example Key', key: defaultSSHKey }]
+    }
+  } else {
+    savedKeys.value = [{ name: 'Example Key', key: defaultSSHKey }]
+    localStorage.setItem('incus_pilot_ssh_keys', JSON.stringify(savedKeys.value))
+  }
+}
+
+const savedKeyOptions = computed(() => {
+  return savedKeys.value.map(k => ({ label: k.name, value: k.name }))
+})
+
+const onKeySelect = (val: string) => {
+  const item = savedKeys.value.find(k => k.name === val)
+  if (item) {
+    createForm.value.sshKey = item.key
+  }
+}
+
+const newKeyForm = ref({ name: '', key: '' })
+
+const saveNewKey = () => {
+  if (!newKeyForm.value.name || !newKeyForm.value.key) {
+    message.warning('Please enter key name and key content')
+    return
+  }
+  savedKeys.value.push({ name: newKeyForm.value.name, key: newKeyForm.value.key })
+  localStorage.setItem('incus_pilot_ssh_keys', JSON.stringify(savedKeys.value))
+  message.success('SSH Key added')
+  newKeyForm.value.name = ''
+  newKeyForm.value.key = ''
+}
+
+const deleteSavedKey = (name: string) => {
+  savedKeys.value = savedKeys.value.filter(k => k.name !== name)
+  localStorage.setItem('incus_pilot_ssh_keys', JSON.stringify(savedKeys.value))
+  message.success('Key removed')
+}
+
+const keyTableColumns = [
+  { title: 'Name', key: 'name' },
+  {
+    title: 'Key Preview',
+    key: 'key',
+    render(row: any) {
+      return row.key ? row.key.substring(0, 24) + '...' : '-'
+    }
+  },
+  {
+    title: 'Action',
+    key: 'action',
+    render(row: any) {
+      return h(
+        NButton,
+        {
+          size: 'small',
+          type: 'error',
+          onClick: () => deleteSavedKey(row.name)
+        },
+        { default: () => 'Delete' }
+      )
+    }
+  }
+]
+
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
   alias: 'alpine/3.21',
-  type: 'container'
+  type: 'container',
+  enableSSH: true,
+  sshKey: defaultSSHKey
 })
 
 const serverOptions = [
@@ -260,9 +371,30 @@ const handleCreate = async () => {
   }
   creating.value = true
   try {
+    const config: Record<string, string> = {}
+    if (createForm.value.enableSSH && createForm.value.sshKey) {
+      const cleanKey = createForm.value.sshKey.trim()
+      config['user.user-data'] = `#cloud-config
+package_update: true
+packages:
+  - openssh-server
+  - openssh
+ssh_authorized_keys:
+  - "${cleanKey}"
+runcmd:
+  - [ sh, -c, "apk add --no-cache openssh-server openssh || dnf install -y openssh-server || apt-get update && apt-get install -y openssh-server || true" ]
+  - [ sh, -c, "mkdir -p /root/.ssh && chmod 700 /root/.ssh" ]
+  - [ sh, -c, "echo '${cleanKey}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys" ]
+  - [ sh, -c, "ssh-keygen -A 2>/dev/null || true" ]
+  - [ sh, -c, "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true" ]
+  - [ sh, -c, "systemctl enable --now sshd || systemctl enable --now ssh || service ssh restart || /usr/sbin/sshd || true" ]
+`
+    }
+
     const payload = {
       name: createForm.value.name,
       type: createForm.value.type,
+      config: config,
       source: {
         type: 'image',
         mode: 'pull',
@@ -379,7 +511,10 @@ const closeTerminal = () => {
   fitAddon = null
 }
 
-onMounted(fetchInstances)
+onMounted(() => {
+  loadSavedKeys()
+  fetchInstances()
+})
 </script>
 
 <style scoped>
