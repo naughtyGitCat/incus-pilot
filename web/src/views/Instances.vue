@@ -359,9 +359,15 @@ const openEditModal = (row: any) => {
 const handleSaveConfig = async () => {
   savingConfig.value = true
   try {
+    let memVal = editForm.value.limitsMemory.trim()
+    // 自动判断如果用户只输入了纯数字，自动追加 GB 单位防崩
+    if (/^\d+$/.test(memVal)) {
+      memVal += 'GB'
+    }
+
     const patchConfig: Record<string, string> = {
-      'limits.cpu': editForm.value.limitsCpu,
-      'limits.memory': editForm.value.limitsMemory
+      'limits.cpu': editForm.value.limitsCpu.trim(),
+      'limits.memory': memVal
     }
     await api.patch(`/incus/instances/${editForm.value.name}`, { config: patchConfig })
     message.success(`Updated resource limits for ${editForm.value.name}`)
@@ -523,7 +529,6 @@ const toggleState = async (row: any) => {
     message.success(`Action ${action} initiated`)
     await fetchInstances()
     emit('refresh-overview')
-    // 再次在 1.5s 后静默重载以捕获正确的动态 IP
     setTimeout(fetchInstances, 1500)
   } catch (err: any) {
     message.error(`Failed to ${action} instance`)
