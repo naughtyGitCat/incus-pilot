@@ -122,6 +122,8 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import api from '../api'
 
+const emit = defineEmits(['refresh-overview'])
+
 const message = useMessage()
 const loading = ref(false)
 const creating = ref(false)
@@ -222,7 +224,7 @@ const keyTableColumns = [
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
-  alias: 'rockylinux/9',
+  alias: 'rockylinux/9/cloud',
   type: 'container',
   enableSSH: true,
   sshKey: defaultSSHKey
@@ -239,14 +241,14 @@ const serverOptions = [
 ]
 
 const aliasOptions = [
-  { label: 'Rocky Linux 9', value: 'rockylinux/9' },
-  { label: 'Rocky Linux 8', value: 'rockylinux/8' },
-  { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
-  { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
-  { label: 'Fedora 40', value: 'fedora/40' },
+  { label: 'Rocky Linux 9 (Cloud)', value: 'rockylinux/9/cloud' },
+  { label: 'Rocky Linux 8 (Cloud)', value: 'rockylinux/8/cloud' },
+  { label: 'Debian 12 (Cloud)', value: 'debian/12/cloud' },
+  { label: 'Ubuntu 24.04 LTS (Cloud)', value: 'ubuntu/24.04/cloud' },
+  { label: 'Fedora 40 (Cloud)', value: 'fedora/40/cloud' },
   { label: 'Alpine 3.21', value: 'alpine/3.21' },
-  { label: 'AlmaLinux 9', value: 'almalinux/9' },
-  { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
+  { label: 'AlmaLinux 9 (Cloud)', value: 'almalinux/9/cloud' },
+  { label: 'CentOS Stream 9 (Cloud)', value: 'centos/9-Stream/cloud' },
   { label: 'Arch Linux', value: 'archlinux' }
 ]
 
@@ -364,7 +366,8 @@ const handleSaveConfig = async () => {
     await api.patch(`/incus/instances/${editForm.value.name}`, { config: patchConfig })
     message.success(`Updated resource limits for ${editForm.value.name}`)
     showEditModal.value = false
-    fetchInstances()
+    await fetchInstances()
+    emit('refresh-overview')
   } catch (err: any) {
     message.error(err.response?.data?.error || 'Failed to update instance config')
   } finally {
@@ -410,6 +413,7 @@ const subscribeOperationEvents = (operationId: string) => {
             setTimeout(() => {
               showProgressModal.value = false
               fetchInstances()
+              emit('refresh-overview')
               eventWs.close()
             }, 1000)
           } else if (op.status === 'Failure') {
@@ -443,6 +447,7 @@ const pollOperationStatus = (operationId: string) => {
         showProgressModal.value = false
         message.success('Creation completed!')
         fetchInstances()
+        emit('refresh-overview')
       } else if (op.status === 'Failure') {
         clearInterval(interval)
         showProgressModal.value = false
@@ -452,6 +457,7 @@ const pollOperationStatus = (operationId: string) => {
       clearInterval(interval)
       showProgressModal.value = false
       fetchInstances()
+      emit('refresh-overview')
     }
   }, 2000)
 }
@@ -515,7 +521,10 @@ const toggleState = async (row: any) => {
   try {
     await api.put(`/incus/instances/${row.name}/state`, { action })
     message.success(`Action ${action} initiated`)
-    setTimeout(fetchInstances, 2000)
+    await fetchInstances()
+    emit('refresh-overview')
+    // 再次在 1.5s 后静默重载以捕获正确的动态 IP
+    setTimeout(fetchInstances, 1500)
   } catch (err: any) {
     message.error(`Failed to ${action} instance`)
   }
@@ -525,7 +534,8 @@ const deleteInstance = async (name: string) => {
   try {
     await api.delete(`/incus/instances/${name}`)
     message.success(`Instance ${name} deleted`)
-    fetchInstances()
+    await fetchInstances()
+    emit('refresh-overview')
   } catch (err: any) {
     message.error(err.response?.data?.error || 'Failed to delete instance')
   }

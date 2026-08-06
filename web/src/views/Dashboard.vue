@@ -1,12 +1,12 @@
 <template>
   <div class="layout">
-    <n-space justify="space-between" align="center" style="margin-bottom: 24px">
+    <n-space justify="space-between" align="center" style="margin-bottom: 24px" class="header-bar">
       <h2>🚀 Incus Pilot Overview</h2>
       <n-button type="warning" size="small" @click="handleLogout">Logout</n-button>
     </n-space>
 
-    <!-- 概览数据卡片 -->
-    <n-grid :cols="4" :x-gap="12">
+    <!-- 全响应式断点栅格：手机 1 列、平板 2 列、桌面 4 列 -->
+    <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="12" :y-gap="12">
       <n-gi>
         <n-card title="Total Instances">
           <div class="stat-value">{{ instancesCount }}</div>
@@ -41,7 +41,7 @@
 
     <!-- 容器列表模块 (Instances) -->
     <div style="margin-top: 24px">
-      <Instances />
+      <Instances @refresh-overview="fetchOverview" />
     </div>
   </div>
 </template>
@@ -83,11 +83,23 @@ onMounted(fetchOverview)
 
 <style scoped>
 .layout {
-  padding: 24px;
+  padding: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+@media (min-width: 768px) {
+  .layout {
+    padding: 24px;
+  }
 }
 .stat-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: bold;
+}
+@media (min-width: 768px) {
+  .stat-value {
+    font-size: 28px;
+  }
 }
 .text-success {
   color: #63e2b7;
