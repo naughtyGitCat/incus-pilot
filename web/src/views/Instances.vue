@@ -197,7 +197,7 @@ const keyTableColumns = [
 const createForm = ref({
   name: '',
   server: 'https://images.linuxcontainers.org',
-  alias: 'alpine/3.21',
+  alias: 'rockylinux/9/cloud',
   type: 'container',
   enableSSH: true,
   sshKey: defaultSSHKey
@@ -208,14 +208,14 @@ const serverOptions = [
 ]
 
 const aliasOptions = [
+  { label: 'Rocky Linux 9 (Cloud)', value: 'rockylinux/9/cloud' },
+  { label: 'Rocky Linux 8 (Cloud)', value: 'rockylinux/8/cloud' },
+  { label: 'Debian 12 (Cloud)', value: 'debian/12/cloud' },
+  { label: 'Ubuntu 24.04 LTS (Cloud)', value: 'ubuntu/24.04/cloud' },
+  { label: 'Fedora 40 (Cloud)', value: 'fedora/40/cloud' },
   { label: 'Alpine 3.21', value: 'alpine/3.21' },
-  { label: 'Rocky Linux 9', value: 'rockylinux/9' },
-  { label: 'Rocky Linux 8', value: 'rockylinux/8' },
-  { label: 'Debian 12 (Bookworm)', value: 'debian/12' },
-  { label: 'Ubuntu 24.04 LTS (Noble)', value: 'ubuntu/24.04' },
-  { label: 'Fedora 40', value: 'fedora/40' },
-  { label: 'AlmaLinux 9', value: 'almalinux/9' },
-  { label: 'CentOS Stream 9', value: 'centos/9-Stream' },
+  { label: 'AlmaLinux 9 (Cloud)', value: 'almalinux/9/cloud' },
+  { label: 'CentOS Stream 9 (Cloud)', value: 'centos/9-Stream/cloud' },
   { label: 'Arch Linux', value: 'archlinux' }
 ]
 
