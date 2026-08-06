@@ -52,7 +52,12 @@ func main() {
 	}
 
 	r.NoRoute(func(c *gin.Context) {
-		c.FileFromFS(c.Request.URL.Path, http.FS(distFS))
+		path := c.Request.URL.Path
+		if path == "/favicon.svg" || path == "/favicon.ico" {
+			c.FileFromFS("favicon.svg", http.FS(distFS))
+			return
+		}
+		c.FileFromFS(path, http.FS(distFS))
 	})
 
 	fmt.Printf("🚀 Incus Pilot listening on http://0.0.0.0:%d\n", *port)

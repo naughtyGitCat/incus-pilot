@@ -30,13 +30,13 @@
         </n-form-item>
         <n-form-item label="Inject SSH Key">
           <n-space vertical style="width: 100%">
-            <n-switch v-model:value="createForm.enableSSH" :disabled="!isCloudImage" />
-            <span v-if="!isCloudImage" style="font-size: 12px; color: #f2c97d">
-              ⚠️ Selected alias is a minimal image without cloud-init. Switch to a <b>/cloud</b> image alias to enable auto SSH key injection.
+            <n-switch v-model:value="createForm.enableSSH" />
+            <span v-if="!isCloudImageHint" style="font-size: 12px; color: #f2c97d">
+              💡 Tip: Make sure to select or type a <b>/cloud</b> image alias (e.g. <i>rockylinux/9/cloud</i>) for cloud-init to execute SSH setup.
             </span>
           </n-space>
         </n-form-item>
-        <template v-if="createForm.enableSSH && isCloudImage">
+        <template v-if="createForm.enableSSH">
           <n-form-item label="Select Saved Key">
             <n-select v-model:value="selectedKeyName" :options="savedKeyOptions" @update:value="onKeySelect" placeholder="Select a saved key" />
           </n-form-item>
@@ -208,7 +208,7 @@ const createForm = ref({
   sshKey: defaultSSHKey
 })
 
-const isCloudImage = computed(() => {
+const isCloudImageHint = computed(() => {
   const alias = createForm.value.alias || ''
   return alias.includes('cloud') || alias.includes('ubuntu') || alias.includes('debian')
 })
@@ -410,7 +410,7 @@ const handleCreate = async () => {
   creating.value = true
   try {
     const config: Record<string, string> = {}
-    if (isCloudImage.value && createForm.value.enableSSH && createForm.value.sshKey) {
+    if (createForm.value.enableSSH && createForm.value.sshKey) {
       const cleanKey = createForm.value.sshKey.trim()
       config['user.user-data'] = `#cloud-config
 package_update: true
